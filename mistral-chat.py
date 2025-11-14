@@ -1,130 +1,65 @@
-import streamlit as st
-import os 
-from mistralai.client import MistralClient
-from mistralai.models.chat_completion import ChatMessage
+import faiss
+import numpy as np
+import pickle
+from embeddings import embed
 
-import logging
-from dotenv import load_dotenv
-load_dotenv(dotenv_path=os.path.join('.', '.env'))
-
-logging.basicConfig(level=logging.INFO)
-
-st.set_page_config(
-    page_title="Chatbot Trifouillis-sur-Loire",
-    page_icon="🤖")
-
-api_key = os.getenv("MISTRAL_API_KEY")
-
-if not api_key:
-    st.error("MISTRAL_API_KEY introuvable. Ajoute-la dans .env ou dans les variables d'environnement.")
-    st.stop()
-
-try: 
-    client = MistralClient(api_key=api_key)
-except Exception as e:
-    st.error(f"Erreur lors de l'initialisation du client Mistral: {e}")
-    st.stop()   
-
-# Charger le prompt système depuis garde-fou.py
-def load_system_prompt():
-    try:
-        with open('garde-fou.py', 'r', encoding='utf-8') as f:
-            return f.read()
-    except FileNotFoundError:
-        return """### RÔLE :
-Vous êtes l'assistant virtuel officiel de la mairie de Trifouillis-sur-Loire. Agissez comme un agent d'accueil numérique compétent et bienveillant.
-
-### COMPORTEMENT & STYLE :
-Ton : Formel, courtois, patient, langage simple et accessible.
-Précision : Informations exactes et vérifiées.
-Ambiguïté : Demander poliment des précisions si la question est vague.
-
-### INTERDICTIONS STRICTES :
-Ne JAMAIS inventer d'informations.
-Ne JAMAIS fournir d'information non vérifiée.
-Ne JAMAIS donner d'avis personnel ou politique."""
-
-if 'messages' not in st.session_state:
-    system_prompt = load_system_prompt()
-    st.session_state.messages = [{"role": "system", "content": system_prompt}]
-
-def generate_prompt_session(messages, max_messages=10):
-    """
-        Construire le prompt pour l'api mistral en utilisant les messages récents.
-
-        Args:
-        messages (list): Liste des messages de la session.
-        max_messages (int): Nombre maximum de messages à inclure dans le prompt.
-
-        Returns: 
-        list[ChatMessage]: Liste des messages formatés pour l'API Mistral.
-    """
-
-    recent_messages = messages[-max_messages:] if len(messages) > max_messages else messages
-
-    format_messages = [
-        ChatMessage(role=msg["role"], content=msg["content"]) for msg in recent_messages
-    ]
-
-    logging.info(f"Prompt construit avec {len(format_messages)} messages.")
-    return format_messages
-
-def generate_response(messages):
-    """
-        Générer une réponse en utilisant l'API Mistral.
-
-        Args:
-        messages (list): Liste des messages de la session.
-
-        Returns:
-        str: Réponse générée par le modèle.
-    """
-    try:
-        prompt = generate_prompt_session(messages)
-
-        # Utiliser la bonne méthode de l'API Mistral
-        response = client.chat(
-            model="mistral-small-latest",  # Modèle correct
-            messages=prompt,
-            max_tokens=500,
-            temperature=0.7,
-            top_p=0.9,
-        )
-
-        answer = response.choices[0].message.content
-        logging.info("Réponse générée avec succès.")
-        return answer
-
-    except Exception as e:
-        logging.error(f"Erreur lors de la génération de la réponse: {e}")
-        # Afficher l'erreur complète pour debug
-        st.error(f"Erreur détaillée : {str(e)}")
-        return f"Désolé, une erreur est survenue : {str(e)}"
+def main():
+    print("Chargement de l'index existant...")
     
-st.title("🤖 Chatbot de la Mairie de Trifouillis-sur-Loire")
-st.caption("Posez vos questions sur les services municipaux.")
+    # Charger l'index et les métadonnées
+    index = faiss.read_index("faiss_index.idx")
+    with open("metadata.pkl", "rb") as f:
+        metadata = pickle.load(f)
+    
+    print(f"Index chargé : {index.ntotal} vecteurs")
+    print(f"Métadonnées chargées : {len(metadata)} entrées\n")
+    
+    while True:
+        print("="*60)
+        question = input("\n Posez votre question (ou 'quit' pour quitter) : ")
+        
+        if question.lower() in ['quit', 'exit', 'q']:
+            print("++")
+            break
+        
+        rechercher_segments_pertinents(question, index, metadata, k=3)
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
 
-if prompt := st.chat_input("Écrivez votre message ici..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.write(prompt)
+def rechercher_segments_pertinents(question, index, metadata, k=3):
+    """
+    Recherche les segments les plus pertinents par rapport à la question posée.
+    Args:
+        question (str): La question posée par l'utilisateur
+        k (int): Nombre de segments à récupérer
+    Returns:
+        list: Liste des segments pertinents
+    """
+    # Obtenir l'embedding de la question
+    question_embedding = embed(question)
+    question_embedding = np.array([question_embedding]).astype('float32')
 
-    prompt_messages_for_api = generate_prompt_session(st.session_state.messages)
+    print("\n Top k segments pertinents pour la question :", question)
 
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        message_placeholder.text("...")  
+    # Recherche dans l'index
+    distances, indices = index.search(question_embedding, k)
+    # Récupération des segments pertinents
 
-        reponse_content = generate_response(st.session_state.messages)
-        message_placeholder.text(reponse_content)
+    segments_pertinents = [] # [chunks[i] for i in indices[0]]
 
-    st.session_state.messages.append({"role": "assistant", "content": reponse_content})
+    for i, idx in enumerate(indices[0]):
+        meta = metadata[idx]
+        distance = distances[0][i]
 
-if st.button("Réinitialiser la conversation"):
-    system_prompt = load_system_prompt()
-    st.session_state.messages = [{"role": "system", "content": system_prompt}]
-    st.rerun()
+        print(f"{'='*60}")
+        print(f"Résultat #{i+1} (distance: {distance:.4f})")
+        print(f"{meta['source']}")
+        print(f" Chunk : {meta['chunk_id'] + 1}/{meta['total_chunks']}")
+        print(f"Texte :")
+        print(f" {meta['text'][:100]}...")
+        segments_pertinents.append(meta)
+
+
+    return segments_pertinents
+
+if __name__ == "__main__":
+    main()

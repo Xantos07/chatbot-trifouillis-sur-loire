@@ -3,6 +3,8 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 
+import numpy as np
+
 load_dotenv(dotenv_path=Path('.') / '.env')
 
 api_key = os.getenv("MISTRAL_API_KEY")
@@ -51,3 +53,18 @@ def embed_chunks(chunks, metadata, batch_size=32):
             metadata_enrichie.append(enriched_meta)
     
     return vecteurs, metadata_enrichie
+
+
+# encodage de la question utilisateur en vecteur
+def embed(text: str):
+    """
+    Fonction qui retourne l'embedding d'un texte en utilisant l'API Mistral.
+    """
+    try:
+        response = client.embeddings(
+            model="mistral-embed",
+            input=text
+        )
+        return np.array(response.data[0].embedding)
+    except Exception as e:
+        return f"Erreur : {e}"

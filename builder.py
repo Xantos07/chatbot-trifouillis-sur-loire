@@ -1,8 +1,9 @@
-import os
+
 import faiss
+import numpy as np
 from utils.data_loader import load_documents_from_dir
 from indexer import split_documents
-from embeddings import embed_chunks
+from embeddings import embed, embed_chunks
 from utils.vector_store import create_index
 import pickle
 
@@ -36,6 +37,14 @@ def main():
     for i in range(min(3, len(embeddings))):
         print(f"  Vecteur {i} → {metadata_enrichie[i]['source']} (chunk {metadata_enrichie[i]['chunk_id']})")
         print(f"    Texte : {metadata_enrichie[i]['text'][:80]}...")
+
+
+
+
+
+
+
+
 
 if __name__ == "__main__":
     main()
