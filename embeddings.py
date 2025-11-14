@@ -1,39 +1,50 @@
-from sentence_transformers import SentenceTransformer
-from sklearn.manifold import TSNE
-import matplotlib.pyplot as plt
+from mistralai.client import MistralClient
+import os
+from dotenv import load_dotenv
+from pathlib import Path
 
-corpus = [
-    "Le projet de rénovation de la mairie avance.",
-    "Une nouvelle école sera inaugurée le mois prochain.",
-    "Les travaux de la route principale sont terminés.",
-    "La bibliothèque municipale organise une exposition.",
-    "Un plan de développement durable a été adopté.",
-    "Quand ouvre la nouvelle école ?",
-    "Quels sont les horaires de la bibliothèque ?",
-    "Où se trouvent les pistes cyclables ?",
-    "Comment participer aux réunions municipales ?",
-    "Qui est responsable des espaces verts ?",
-    "Quels sont les projets pour le centre-ville ?",
-    "Y a-t-il des événements prévus ce week-end ?",
-    "quelles sont les fermes de poximité ?",
-    "quelles sont les especes d'oiseaux locales ?",
-    "comment fonctionne le tri des déchets ?"
-]
+load_dotenv(dotenv_path=Path('.') / '.env')
 
-model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
-embeddings = model.encode(corpus)
+api_key = os.getenv("MISTRAL_API_KEY")
+if not api_key:
+    raise EnvironmentError("MISTRAL_API_KEY introuvable.")
 
-# Réduction de dimensionnalité avec t-SNE
-tsne = TSNE(n_components=2, perplexity=1, max_iter=1000)  # <-- Changé n_iter en max_iter
-embeddings_2d = tsne.fit_transform(embeddings)
+client = MistralClient(api_key=api_key)
 
-# previsualisation des embeddings 
-plt.figure(figsize=(8, 6))
-plt.scatter(embeddings_2d[:, 0], embeddings_2d[:, 1], color='blue')
-for i, text in enumerate(corpus):
-    plt.annotate(text, (embeddings_2d[i, 0], embeddings_2d[i, 1]), fontsize=9)
-plt.title("Visualisation des embeddings avec t-SNE")
-plt.xlabel("Dimension 1")
-plt.ylabel("Dimension 2")
-plt.grid(True)
-plt.show()
+def embed_chunks(chunks, batch_size=32):
+    """
+    Transforme une liste de chunks en vecteurs (par batch pour optimiser).
+    
+    Args:
+        chunks: Liste de textes à vectoriser
+        batch_size: Nombre de chunks par requête API (max recommandé: 32)
+    
+    Returns:
+        Liste de vecteurs
+    """
+    vecteurs = []
+    
+    # Traiter par batch pour réduire le nombre d'appels API
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i:i+batch_size]
+        
+        print(f"Vectorisation batch {i//batch_size + 1}/{(len(chunks)-1)//batch_size + 1} ({len(batch)} chunks)...")
+        
+        # Un seul appel API pour tout le batch
+        response = client.embeddings(
+            model="mistral-embed",
+            input=batch  # ← Liste de textes
+        )
+        
+        # Récupération de tous les vecteurs du batch
+        for data in response.data:
+            vecteurs.append(data.embedding)
+    
+    return vecteurs
+
+# Utilisation
+chunks = ["Le chat dort.", "Python est super.", "Le soleil brille."]
+vecteurs = embed_chunks(chunks)
+
+print(f"Nombre de chunks: {len(vecteurs)}")
+print(f"Taille d'un vecteur: {len(vecteurs[0])}")
