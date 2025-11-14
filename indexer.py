@@ -2,29 +2,36 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Initialisation du splitter
 text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000, # Taille de chaque segment
-    chunk_overlap=200 # Chevauchement entre les segments
+    chunk_size=1000,
+    chunk_overlap=200
 )
-    
-# Découpage du texte
-segments = text_splitter.split_text("Votre texte ici")
 
 def split_documents(documents):
     """
-    Découpe une liste de documents en segments plus petits.
+    Découpe un dict {nom: texte} en segments avec métadonnées.
 
     Args:
-        documents (list): Liste de chaînes de caractères représentant les documents.
+        documents (dict): {nom_fichier: texte}
 
     Returns:
-        list: Liste des segments découpés.
+        tuple: (liste_textes, liste_métadonnées)
     """
-    all_segments = []
-    for doc_name, doc in documents.items():
-        segments = text_splitter.split_text(doc)
-        all_segments.extend(segments)
-
-        print(f"Document : {doc_name if doc_name else 'Inconnu'}")
-        print(f"Document découpé en {len(segments)} segments.")
-        print("-" * 40)
-    return all_segments
+    all_chunks = []
+    all_metadata = []
+    
+    for doc_name, doc_text in documents.items():
+        segments = text_splitter.split_text(doc_text)
+        
+        print(f"Document : {doc_name}")
+        print(f"  → {len(segments)} segments créés")
+        print("-" * 60)
+        
+        for i, segment in enumerate(segments):
+            all_chunks.append(segment)
+            all_metadata.append({
+                "source": doc_name,
+                "chunk_id": i,
+                "total_chunks": len(segments)
+            })
+    
+    return all_chunks, all_metadata
