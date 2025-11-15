@@ -84,7 +84,7 @@ def generate_response(messages):
 
         # Utiliser la bonne méthode de l'API Mistral
         response = client.chat(
-            model="mistral-small-latest",  # Modèle correct
+            model="mistral-small-latest",  
             messages=prompt,
             max_tokens=500,
             temperature=0.7,

@@ -1,3 +1,4 @@
+from click import prompt
 import faiss
 import numpy as np
 import pickle
@@ -6,16 +7,51 @@ from embeddings import embed
 from mistralai.client import MistralClient
 from mistralai.models.chat_completion import ChatMessage
 from dotenv import load_dotenv
+import streamlit as st
 
 # Charger les variables d'environnement
 load_dotenv()
-client = MistralClient(api_key=os.getenv("MISTRAL_API_KEY"))
+api_key = os.getenv("MISTRAL_API_KEY")
+
+st.set_page_config(
+    page_title="Chatbot Trifouillis-sur-Loire",
+    page_icon="🤖")
+
+if not api_key:
+    st.error("MISTRAL_API_KEY introuvable. Ajoute-la dans .env ou dans les variables d'environnement.")
+    st.stop()
+
+try: 
+    client = MistralClient(api_key=api_key)
+except Exception as e:
+    st.error(f"Erreur lors de l'initialisation du client Mistral: {e}")
+    st.stop()   
 
 # Variables globales pour l'index
 index = None
 metadata = None
 
-def main():
+def load_system_prompt():
+    """Charge le prompt système depuis garde-fou.py."""
+    try:
+        with open('garde-fou.py', 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        return """### RÔLE :
+Vous êtes l'assistant virtuel officiel de la mairie de Trifouillis-sur-Loire. Agissez comme un agent d'accueil numérique compétent et bienveillant.
+
+### COMPORTEMENT & STYLE :
+Ton : Formel, courtois, patient, langage simple et accessible.
+Précision : Informations exactes et vérifiées.
+Ambiguïté : Demander poliment des précisions si la question est vague.
+
+### INTERDICTIONS STRICTES :
+Ne JAMAIS inventer d'informations.
+Ne JAMAIS fournir d'information non vérifiée.
+Ne JAMAIS donner d'avis personnel ou politique."""
+
+def load_index():
+    """Charge l'index Faiss et les métadonnées depuis les fichiers."""
     global index, metadata
     
     print("Chargement de l'index existant : ")
@@ -27,45 +63,59 @@ def main():
     
     print(f"Index chargé : {index.ntotal} vecteurs")
     print(f"Métadonnées chargées : {len(metadata)} entrées\n")
-    
-    # Historique de conversation
-    messages = []
-    
-    # Boucle interactive
-    while True:
-        print("="*60)
-        question = input("\n🤖 Posez votre question (ou 'quit' pour quitter) : ")
-        
-        if question.lower() in ['quit', 'exit', 'q']:
-            print("Au revoir !")
-            break
-        
-        # Ajouter la question à l'historique
-        messages.append({"role": "user", "content": question})
-        
-        # Construire le prompt avec contexte
-        formatted_messages = construire_prompt_session(messages, question, max_messages=5)
-        
-        # Appeler l'API Mistral pour générer la réponse
-        print("\n Génération de la réponse...")
-        try:
-            response = client.chat(
-                model="mistral-small-latest",
-                messages=formatted_messages
-            )
-            
-            reponse = response.choices[0].message.content
-            
-            # Ajouter la réponse à l'historique
-            messages.append({"role": "assistant", "content": reponse})
-            
-            # Afficher la réponse
-            print(f"\n Réponse :\n{reponse}\n")
-            
-        except Exception as e:
-            print(f" Erreur lors de la génération : {e}")
-            # Retirer la question de l'historique en cas d'erreur
-            messages.pop()
+
+
+# Initialiser l'historique de session Streamlit
+if 'messages' not in st.session_state:
+    system_prompt = load_system_prompt()
+    st.session_state.messages = [{"role": "system", "content": system_prompt}]
+
+# Charger l'index au démarrage
+load_index()
+
+def main():
+    st.title("🤖 Chatbot Mairie de Trifouillis-sur-Loire")
+    st.markdown("Bienvenue! Posez vos questions sur Trifouillis-sur-Loire.")
+
+    # historique des messages
+    for message in st.session_state.messages:
+        if message["role"] != "system":  # Ne pas afficher le prompt système
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+    # utilisateur pose une question
+    if question := st.chat_input("Posez votre question ici..."):
+        # Ajouter la question de l'utilisateur à l'historique
+        st.session_state.messages.append({"role": "user", "content": question})
+        with st.chat_message("user"):
+            st.markdown(question)
+
+    # Afficher la réponse du bot
+        with st.chat_message("assistant"):
+            with st.spinner("Recherche des informations..."):
+                # Construire le prompt avec contexte
+                formatted_messages = construire_prompt_session(
+                    st.session_state.messages, 
+                    question, 
+                    max_messages=10
+                )
+                
+                try:
+                    response = client.chat(
+                    model="mistral-small-latest",  
+                    messages=formatted_messages,
+                    max_tokens=500,
+                    temperature=0.7,
+                    top_p=0.9,
+                    )
+                    reponse = response.choices[0].message.content
+
+                    st.session_state.messages.append({"role": "assistant", "content": reponse})
+                    st.markdown(reponse)
+                except Exception as e:
+                    st.error(f"Erreur lors de la génération de la réponse: {e}")
+                    st.session_state.messages.pop()
+
 
 
 def rechercher_segments_pertinents(question, k=3):
